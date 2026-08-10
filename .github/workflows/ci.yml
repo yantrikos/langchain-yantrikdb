@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Tests (py${{ matrix.python-version }}, ${{ matrix.lc-line }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12", "3.13"]
+        # Both supported langchain-core lines. The pyproject range says
+        # >=0.3,<2.0 — this axis is what keeps that claim honest.
+        lc-line: ["lc03", "lc1"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          allow-prereleases: true
+
+      - name: Install package + dev deps
+        run: |
+          python -m pip install -U pip
+          pip install -e ".[dev]"
+
+      # Installed AFTER the package so this pin wins over the range
+      # resolved above, then asserted — a silently-wrong resolve would
+      # otherwise make one leg a duplicate of the other.
+      - name: Pin langchain-core line (${{ matrix.lc-line }})
+        run: |
+          if [ "${{ matrix.lc-line }}" = "lc03" ]; then
+            pip install -U "langchain-core>=0.3.0,<1.0.0"
+          else
+            pip install -U "langchain-core>=1.0.0,<2.0.0"
+          fi
+
+      - name: Verify the intended langchain-core line got installed
+        run: |
+          python - <<'EOF'
+          from importlib.metadata import version
+          v = version("langchain-core")
+          want_lc03 = "${{ matrix.lc-line }}" == "lc03"
+          major = int(v.split(".")[0])
+          print(f"resolved langchain-core {v}")
+          assert (major == 0) == want_lc03, f"expected {'0.3.x' if want_lc03 else '1.x'}, got {v}"
+          EOF
+
+      - name: Run tests
+        run: pytest -q
+
+      - name: Run the README example end to end
+        run: python examples/contradiction_detection.py

@@ -1,0 +1,64 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "langchain-yantrikdb"
+version = "0.1.0"
+description = "YantrikDB integration for LangChain — cognitive memory as a VectorStore and ChatMessageHistory. Stored memories decay, consolidate, and get contradiction-checked."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [
+    { name = "Pranab Sarkar", email = "developer@pranab.co.in" },
+]
+keywords = [
+    "langchain", "langchain-integration", "vectorstore", "chat-history",
+    "agent-memory", "ai-memory", "llm-memory", "cognitive-memory", "persistent-memory",
+    "ai-agents", "rag", "retrieval",
+    "knowledge-graph", "vector-database", "embeddings", "semantic-search",
+    "yantrikdb", "sqlite", "rust", "python",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    # The VectorStore / BaseChatMessageHistory / message-serde surfaces this
+    # package uses are identical across the 0.3.x and 1.x lines; CI runs the
+    # test suite against both. The ceiling moves to the next major only when
+    # that major is actually tested, never speculatively.
+    "langchain-core>=0.3.0,<2.0.0",
+    # Engine pin bound to the tested minor (same D3-firewall convention as
+    # yantrikdb-mcp): this package is contract-tested against 0.13.x
+    # (record/recall namespace filters, record_turn/recent_turns/clear_turns
+    # conversation buffer, think(), why_retrieved). The range widens only
+    # after the next engine minor is added to CI.
+    "yantrikdb>=0.13.0,<0.14.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+
+[project.urls]
+Homepage = "https://yantrikdb.com"
+Repository = "https://github.com/spranab/langchain-yantrikdb"
+Documentation = "https://github.com/spranab/langchain-yantrikdb#readme"
+Issues = "https://github.com/spranab/langchain-yantrikdb/issues"
+
+[tool.setuptools]
+packages = ["langchain_yantrikdb"]
+
+[tool.setuptools.package-data]
+langchain_yantrikdb = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
