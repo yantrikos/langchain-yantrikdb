@@ -50,9 +50,9 @@ dev = [
 
 [project.urls]
 Homepage = "https://yantrikdb.com"
-Repository = "https://github.com/spranab/langchain-yantrikdb"
-Documentation = "https://github.com/spranab/langchain-yantrikdb#readme"
-Issues = "https://github.com/spranab/langchain-yantrikdb/issues"
+Repository = "https://github.com/yantrikos/langchain-yantrikdb"
+Documentation = "https://github.com/yantrikos/langchain-yantrikdb#readme"
+Issues = "https://github.com/yantrikos/langchain-yantrikdb/issues"
 
 [tool.setuptools]
 packages = ["langchain_yantrikdb"]
