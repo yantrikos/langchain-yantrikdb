@@ -168,7 +168,7 @@ Tested against langchain-core 0.3.x and 1.x on Python 3.10-3.14.
 
 ## License
 
-MIT (this integration). The YantrikDB engine is AGPL-3.0.
+MIT (this integration). The YantrikDB engine is Apache-2.0.
 
 ---
 
