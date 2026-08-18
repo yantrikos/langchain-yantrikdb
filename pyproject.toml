@@ -62,3 +62,8 @@ langchain_yantrikdb = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# The standard suite ships its async conformance tests as bare `async def`
+# coroutines, so a runner plugin is required for them to execute at all.
+# auto mode means they run without the suite's own test bodies being
+# decorated or otherwise altered.
+asyncio_mode = "auto"

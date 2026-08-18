@@ -88,9 +88,40 @@ def test_add_documents_and_retriever(store):
     assert docs[0].page_content == "Standup is at 09:30 on weekdays"
 
 
-def test_caller_ids_rejected(store):
-    with pytest.raises(NotImplementedError):
-        store.add_texts(["x"], ids=["my-id"])
+def test_caller_ids_are_upsert_keys(store):
+    """Caller-supplied ids are accepted and act as upsert keys.
+
+    Replaces the old test that asserted NotImplementedError: LangChain's
+    standard VectorStore suite requires caller ids, so add_texts now stores
+    them and re-adding an id replaces that document rather than duplicating.
+    """
+    returned = store.add_texts(["first version"], ids=["my-id"])
+    assert returned == ["my-id"]
+
+    got = store.get_by_ids(["my-id"])
+    assert len(got) == 1
+    assert got[0].id == "my-id"
+    assert got[0].page_content == "first version"
+
+    # same id again -> in-place replacement, not a second document
+    store.add_texts(["second version"], ids=["my-id"])
+    got = store.get_by_ids(["my-id"])
+    assert len(got) == 1
+    assert got[0].page_content == "second version"
+
+    # the internal id-carrying key never leaks into caller-visible metadata
+    assert not any(k.startswith("__lc_id__") for k in got[0].metadata)
+
+    # a None entry falls back to the engine-assigned rid
+    (rid,) = store.add_texts(["engine assigns this"], ids=[None])
+    assert rid and rid != "my-id"
+
+
+def test_mixed_caller_and_engine_ids(store):
+    ids = store.add_texts(["a", "b"], ids=["given-a", None])
+    assert ids[0] == "given-a"
+    assert ids[1] != "given-a"
+    assert len(store.get_by_ids(ids)) == 2
 
 
 def test_get_by_ids(store):

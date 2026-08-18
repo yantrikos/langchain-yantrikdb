@@ -24,6 +24,13 @@ from yantrikdb import YantrikDB
 
 DEFAULT_NAMESPACE = "langchain"
 
+# Metadata key under which a caller-supplied document id is stored. YantrikDB
+# mints its own UUIDv7 rid for every record and that rid is not caller-
+# choosable, so an externally-chosen id has to live alongside the record
+# instead. It is stripped again on the way out, so it never appears in the
+# metadata a caller gets back.
+_LC_ID_KEY = "__lc_id__"
+
 
 class _EmbeddingsShim:
     """Adapt a LangChain ``Embeddings`` object to the ``encode(text)``
@@ -156,24 +163,32 @@ class YantrikDBVectorStore(VectorStore):
         texts: Iterable[str],
         metadatas: list[dict] | None = None,
         *,
-        ids: list[str] | None = None,
+        ids: list[str | None] | None = None,
         importance: float | None = None,
         memory_type: str | None = None,
         domain: str | None = None,
         source: str | None = None,
         **kwargs: Any,
     ) -> list[str]:
-        """Store texts as memories. Returns the engine-assigned record ids.
+        """Store texts as memories. Returns one id per text, in order.
 
-        YantrikDB assigns every record a UUIDv7 rid; caller-supplied ``ids``
-        are not supported and raise ``NotImplementedError``. Use the
-        returned rids for ``get_by_ids`` / ``delete``.
+        Ids are **upsert keys**. Adding the same id twice replaces the earlier
+        memory instead of duplicating it, so a repeated ``add_texts`` is
+        idempotent, and re-adding an id with new text mutates that document
+        in place.
+
+        Where an entry of ``ids`` is ``None`` — or ``ids`` is omitted entirely
+        — the engine's own UUIDv7 rid becomes that document's id. Both kinds
+        of id are accepted everywhere this class takes one (``get_by_ids``,
+        ``delete``), and whichever applies is what comes back as
+        ``Document.id``.
 
         Args:
             texts: Texts to store.
             metadatas: Optional per-text metadata dicts; round-trip intact
-                onto retrieved ``Document.metadata``.
-            ids: Not supported — YantrikDB assigns rids.
+                onto retrieved ``Document.metadata``. Never mutated.
+            ids: Optional per-text ids, used as upsert keys. May contain
+                ``None`` for texts that should take an engine-assigned rid.
             importance: Override the store's default importance for this
                 batch (0.0-1.0). Importance slows decay and raises rank.
             memory_type: Override memory type (``"semantic"``,
@@ -181,31 +196,102 @@ class YantrikDBVectorStore(VectorStore):
             domain: Override domain tag.
             source: Override source tag.
         """
-        if ids is not None:
-            raise NotImplementedError(
-                "YantrikDB assigns UUIDv7 record ids; caller-supplied ids are "
-                "not supported. Use the ids returned by add_texts()."
-            )
         texts = list(texts)
         if metadatas is not None and len(metadatas) != len(texts):
             raise ValueError(
                 f"metadatas length ({len(metadatas)}) does not match "
                 f"texts length ({len(texts)})"
             )
-        rids: list[str] = []
-        for i, text in enumerate(texts):
-            rids.append(
-                self._db.record(
-                    text,
-                    memory_type=memory_type or self._memory_type,
-                    importance=self._importance if importance is None else importance,
-                    metadata=(metadatas[i] if metadatas else None) or {},
-                    namespace=self._namespace,
-                    domain=domain or self._domain,
-                    source=source or self._source,
-                )
+        if ids is not None and len(ids) != len(texts):
+            raise ValueError(
+                f"ids length ({len(ids)}) does not match "
+                f"texts length ({len(texts)})"
             )
-        return rids
+
+        supplied: list[str | None] = [None] * len(texts) if ids is None else list(ids)
+
+        # Upsert: tombstone whatever those ids already name before the
+        # replacements land. One paged scan resolves the whole batch, so a
+        # bulk re-add costs a single pass rather than one pass per id.
+        reused = {i for i in supplied if i is not None}
+        if reused:
+            for rid in self._resolve_external_ids(reused).values():
+                self._db.forget(rid)
+
+        assigned: list[str] = []
+        for i, text in enumerate(texts):
+            # Copied, never aliased: add_documents hands us Document.metadata
+            # directly, and the caller's object must not grow a private key.
+            metadata = dict(metadatas[i]) if metadatas else {}
+            external = supplied[i]
+            if external is not None:
+                metadata[_LC_ID_KEY] = external
+            rid = self._db.record(
+                text,
+                memory_type=memory_type or self._memory_type,
+                importance=self._importance if importance is None else importance,
+                metadata=metadata,
+                namespace=self._namespace,
+                domain=domain or self._domain,
+                source=source or self._source,
+            )
+            assigned.append(rid if external is None else external)
+        return assigned
+
+    # -- id resolution -----------------------------------------------------
+
+    def _resolve_external_ids(self, wanted: set[str]) -> dict[str, str]:
+        """Map caller-supplied ids to engine rids with one paged scan of this
+        namespace, stopping as soon as every id is accounted for.
+
+        The engine indexes records by rid and by vector, not by an arbitrary
+        metadata key, so resolving an external id is a scan by construction.
+        Ids this namespace does not carry are simply absent from the result.
+        """
+        found: dict[str, str] = {}
+        cursor: str | None = None
+        while wanted - found.keys():
+            page = self._db.list_records(
+                namespace=self._namespace, since_rid=cursor, limit=200
+            )
+            for rec in page["records"]:
+                if rec.get("consolidation_status") == "tombstoned":
+                    continue
+                external = (rec.get("metadata") or {}).get(_LC_ID_KEY)
+                if external in wanted:
+                    found.setdefault(external, rec["rid"])
+            cursor = page["next_cursor"]
+            if cursor is None:
+                break
+        return found
+
+    def _active(self, rid: str) -> dict | None:
+        """The live record for an engine rid, or ``None`` when it names
+        nothing or has been forgotten. An unknown id reads as ``None`` rather
+        than raising, which is what the LangChain id contract wants."""
+        rec = self._db.get(rid)
+        if rec is None or rec.get("consolidation_status") == "tombstoned":
+            return None
+        return rec
+
+    def _records_for(self, ids: Sequence[str]) -> dict[str, dict]:
+        """Resolve a mix of engine rids and caller-supplied ids to live
+        records, keyed by the id as it was asked for. Ids naming nothing are
+        omitted."""
+        found: dict[str, dict] = {}
+        unresolved: set[str] = set()
+        for identifier in ids:
+            rec = self._active(identifier)
+            if rec is not None:
+                found[identifier] = rec
+            else:
+                unresolved.add(identifier)
+        if unresolved:
+            for external, rid in self._resolve_external_ids(unresolved).items():
+                rec = self._active(rid)
+                if rec is not None:
+                    found[external] = rec
+        return found
 
     # -- VectorStore: read path -------------------------------------------
 
@@ -222,11 +308,15 @@ class YantrikDBVectorStore(VectorStore):
         return self._db.recall(top_k=fetch_k, **recall_kwargs)[:k]
 
     @staticmethod
-    def _hit_to_document(hit: dict) -> Document:
+    def _to_document(record: dict) -> Document:
+        """Engine record — or recall hit, same shape — to ``Document``, with
+        any caller-supplied id lifted back out of metadata."""
+        metadata = dict(record.get("metadata") or {})
+        external = metadata.pop(_LC_ID_KEY, None)
         return Document(
-            id=hit["rid"],
-            page_content=hit["text"],
-            metadata=hit.get("metadata") or {},
+            id=record["rid"] if external is None else external,
+            page_content=record["text"],
+            metadata=metadata,
         )
 
     def similarity_search(
@@ -243,7 +333,7 @@ class YantrikDBVectorStore(VectorStore):
         (``memory_type=``, ``domain=``, ``source=``, ``certainty_min=``,
         ``namespace=`` to override the store default, ...).
         """
-        return [self._hit_to_document(h) for h in self._recall(k, query=query, **kwargs)]
+        return [self._to_document(h) for h in self._recall(k, query=query, **kwargs)]
 
     def similarity_search_with_score(
         self, query: str, k: int = 4, **kwargs: Any
@@ -252,7 +342,7 @@ class YantrikDBVectorStore(VectorStore):
         score (0.0-1.0; similarity x decay x recency x importance).
         Higher is better."""
         return [
-            (self._hit_to_document(h), h["score"])
+            (self._to_document(h), h["score"])
             for h in self._recall(k, query=query, **kwargs)
         ]
 
@@ -262,7 +352,7 @@ class YantrikDBVectorStore(VectorStore):
         """Retrieve by a precomputed query vector. The vector's dimension
         must match the database's embedding dimension."""
         return [
-            self._hit_to_document(h)
+            self._to_document(h)
             for h in self._recall(k, query_embedding=embedding, **kwargs)
         ]
 
@@ -271,29 +361,26 @@ class YantrikDBVectorStore(VectorStore):
         return lambda score: max(0.0, min(1.0, score))
 
     def get_by_ids(self, ids: Sequence[str], /) -> list[Document]:
-        """Fetch memories by rid. Missing or deleted (tombstoned) rids are
-        skipped, per the LangChain contract."""
-        docs: list[Document] = []
-        for rid in ids:
-            rec = self._db.get(rid)
-            if rec is None or rec.get("consolidation_status") == "tombstoned":
-                continue
-            docs.append(
-                Document(
-                    id=rec["rid"],
-                    page_content=rec["text"],
-                    metadata=rec.get("metadata") or {},
-                )
-            )
-        return docs
+        """Fetch memories by id, in the order asked for.
+
+        Accepts caller-supplied ids and engine rids interchangeably. Ids that
+        name nothing — never stored, or already forgotten — are skipped
+        rather than raising, per the LangChain contract.
+        """
+        found = self._records_for(ids)
+        return [self._to_document(found[i]) for i in ids if i in found]
 
     def delete(self, ids: list[str] | None = None, **kwargs: Any) -> bool | None:
         """Forget memories. ``ids=None`` forgets every record in this
         store's namespace. Forgetting is a tombstone (soft delete) — the
-        record stops being retrievable immediately."""
+        record stops being retrievable immediately.
+
+        Accepts caller-supplied ids and engine rids interchangeably. Ids that
+        name nothing are ignored rather than raising.
+        """
         if ids is not None:
-            for rid in ids:
-                self._db.forget(rid)
+            for rec in self._records_for(ids).values():
+                self._db.forget(rec["rid"])
             return True
         cursor: str | None = None
         while True:
@@ -314,7 +401,7 @@ class YantrikDBVectorStore(VectorStore):
         embedding: Embeddings | None = None,
         metadatas: list[dict] | None = None,
         *,
-        ids: list[str] | None = None,
+        ids: list[str | None] | None = None,
         db_path: str = ":memory:",
         namespace: str = DEFAULT_NAMESPACE,
         **kwargs: Any,
@@ -348,7 +435,7 @@ class YantrikDBVectorStore(VectorStore):
         """
         return [
             (
-                self._hit_to_document(h),
+                self._to_document(h),
                 {
                     "score": h.get("score"),
                     "scores": h.get("scores"),
