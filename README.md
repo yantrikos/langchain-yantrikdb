@@ -1,5 +1,8 @@
 # langchain-yantrikdb
 
+[![PyPI](https://img.shields.io/pypi/v/langchain-yantrikdb)](https://pypi.org/project/langchain-yantrikdb/)
+[![Python](https://img.shields.io/pypi/pyversions/langchain-yantrikdb)](https://pypi.org/project/langchain-yantrikdb/)
+
 A vector store treats your agent's memory as an append-only pile. Store
 "the rate limit is 100/min" today and "the rate limit is 500/min" next
 month, and both sit there forever, equally weighted — retrieval returns
