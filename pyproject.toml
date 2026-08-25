@@ -40,12 +40,13 @@ dependencies = [
     # (record/recall namespace filters, record_turn/recent_turns/clear_turns
     # conversation buffer, think(), why_retrieved). The range widens only
     # after the next engine minor is added to CI.
-    "yantrikdb>=0.13.0,<0.14.0",
+    "yantrikdb>=0.13.0,<0.18.0",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
+    "langchain-tests>=1.0,<2.0",
 ]
 
 [project.urls]
