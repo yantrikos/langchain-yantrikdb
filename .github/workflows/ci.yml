@@ -58,3 +58,37 @@ jobs:
 
       - name: Run the README example end to end
         run: python examples/contradiction_detection.py
+
+  # Ordinary CI always resolves the engine CEILING, so widening the range
+  # (>=0.13,<0.18) would silently stop protecting the floor and intermediate
+  # minors. This job pins each advertised minor explicitly (installed AFTER
+  # the package so the pin wins) on the langchain-core 1.x line.
+  engine-compat:
+    name: engine-compat (yantrikdb ${{ matrix.engine }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        engine: ["0.13.4", "0.14.1", "0.15.6", "0.16.0", "0.17.1"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install package + dev extras
+        run: |
+          python -m pip install -U pip
+          pip install -e ".[dev]"
+      - name: Pin the engine minor under test and the 1.x langchain line
+        run: |
+          pip install -U "yantrikdb==${{ matrix.engine }}" "langchain-core>=1.0.0,<2.0.0" "langchain-tests>=1.0.0,<2.0.0"
+      - name: Verify the intended engine got installed
+        run: |
+          python - <<'PY'
+          import importlib.metadata as m, sys
+          got = m.version("yantrikdb"); want = "${{ matrix.engine }}"
+          assert got == want, f"engine resolved to {got}, wanted {want}"
+          print("engine", got)
+          PY
+      - name: Run tests
+        run: pytest -q
