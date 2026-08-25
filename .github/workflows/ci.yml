@@ -17,6 +17,10 @@ jobs:
         # Both supported langchain-core lines. The pyproject range says
         # >=0.3,<2.0 — this axis is what keeps that claim honest.
         lc-line: ["lc03", "lc1"]
+        exclude:
+          # langchain-tests 1.x (the lc1 leg) imports datetime.UTC, which is 3.11+.
+          - python-version: "3.10"
+            lc-line: lc1
     steps:
       - uses: actions/checkout@v4
 
@@ -36,9 +40,10 @@ jobs:
       - name: Pin langchain-core line (${{ matrix.lc-line }})
         run: |
           if [ "${{ matrix.lc-line }}" = "lc03" ]; then
-            pip install -U "langchain-core>=0.3.0,<1.0.0"
+            # langchain-tests follows the core line: its 1.x imports core-1.x modules.
+            pip install -U "langchain-core>=0.3.0,<1.0.0" "langchain-tests>=0.3.0,<1.0.0"
           else
-            pip install -U "langchain-core>=1.0.0,<2.0.0"
+            pip install -U "langchain-core>=1.0.0,<2.0.0" "langchain-tests>=1.0.0,<2.0.0"
           fi
 
       - name: Verify the intended langchain-core line got installed
