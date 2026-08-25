@@ -17,10 +17,6 @@ jobs:
         # Both supported langchain-core lines. The pyproject range says
         # >=0.3,<2.0 — this axis is what keeps that claim honest.
         lc-line: ["lc03", "lc1"]
-        exclude:
-          # langchain-tests 1.x (the lc1 leg) imports datetime.UTC, which is 3.11+.
-          - python-version: "3.10"
-            lc-line: lc1
     steps:
       - uses: actions/checkout@v4
 
