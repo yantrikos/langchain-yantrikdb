@@ -2,6 +2,8 @@
 
 [![PyPI](https://img.shields.io/pypi/v/langchain-yantrikdb)](https://pypi.org/project/langchain-yantrikdb/)
 [![Python](https://img.shields.io/pypi/pyversions/langchain-yantrikdb)](https://pypi.org/project/langchain-yantrikdb/)
+[![Downloads](https://img.shields.io/pypi/dm/langchain-yantrikdb)](https://pypi.org/project/langchain-yantrikdb/)
+[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 A vector store treats your agent's memory as an append-only pile. Store
 "the rate limit is 100/min" today and "the rate limit is 500/min" next
@@ -17,16 +19,17 @@ memories:
 - **Temporal decay** — each record has a half-life; ranking blends
   similarity with decay, recency, and importance, so stale facts lose to
   fresh ones at equal similarity.
-- **Contradiction detection** — `store.think()` scans what you stored and
-  flags records that disagree, with rids and a suggested action.
+- **Conflict candidates** — `store.think()` flags pairs of very similar
+  records that may contradict each other and hands them back with rids and
+  a suggested action for you to review. This is a similarity flag, not
+  natural-language inference: see the caveat below.
 - **Consolidation** — near-duplicates get merged instead of accumulating.
 - **Explainable retrieval** — every hit can tell you *why* it surfaced
-  (`"semantically similar (0.90)"`, `"recent"`, `"important (decay=0.80)"`).
+  (`"semantically similar (0.72)"`, `"recent"`, `"important (decay=0.50)"`).
 
 No external services and no model download: the engine is an embedded
-Rust core (SQLite-backed, single file) with a bundled 64-dimension
-embedder. Bring your own LangChain `Embeddings` if you want a larger
-model.
+Rust core (SQLite-backed, single file) with a bundled embedder. Bring
+your own LangChain `Embeddings` if you want a larger model.
 
 ## 60 seconds
 
@@ -52,7 +55,7 @@ retriever = store.as_retriever()  # drop into any chain
 
 ## The part a plain vector store can't do
 
-Store two facts that contradict each other, then ask the engine to think:
+Store two facts that disagree, then ask the engine to think:
 
 ```python
 store.add_texts([
@@ -62,19 +65,28 @@ store.add_texts([
 
 report = store.think()
 for trigger in report["triggers"]:
-    print(trigger["reason"])
-# Two memories are 97% similar and may be redundant (rid_a=..., rid_b=...):
-# 'The API rate limit is 500 requests per minute' vs
-# 'The API rate limit is 100 requests per minute'
-# suggested_action: consolidate_or_forget
+    print(trigger["reason"], "->", trigger["suggested_action"])
+# Two memories about 'API' are 97% similar but may contradict each other
+# (rid_a=..., rid_b=...) -> review_conflict
 ```
+
+What that is, and what it isn't: `think()` flags pairs of records whose
+embeddings are very similar (97% here) and leaves the decision to you. The label depends on the engine release: 0.18.x reports this pair as
+`potential_conflict` / `review_conflict`, while 0.13.x (what PyPI's 0.1.0
+installs) reports it as `redundancy` / `consolidate_or_forget`.
+
+`store.conflicts()` is the separate, stricter list. YantrikDB detects
+contradictions between structured or recognized single-valued claims,
+including polarity and temporal conflicts, and records them for review;
+arbitrary sentence pairs and multi-valued relations are intentionally not
+flagged. For plain sentences like the ones above it stays empty.
 
 And ask retrieval to explain itself:
 
 ```python
 for doc, why in store.explain_search("what is the rate limit?", k=2):
     print(doc.page_content, why["why_retrieved"])
-# ... ['semantically similar (0.93)', 'recent', 'important (decay=0.80)']
+# ... ['semantically similar (0.72)', 'recent', 'important (decay=0.50)', 'keyword_match']
 ```
 
 Scores returned by `similarity_search_with_score` are the same blended
@@ -121,7 +133,9 @@ store = YantrikDBVectorStore(
 The embedding dimension is probed at construction and must stay
 consistent for the lifetime of the database file. With `embedding=None`
 the bundled embedder is used — adequate for agent-memory recall, smaller
-than sentence-transformer models.
+than sentence-transformer models. Its dimension is fixed when the file is
+created (64 with engine 0.13.x, 256 with 0.18.x), and an existing file
+keeps its original dimension when you upgrade the engine.
 
 ## When NOT to use this
 
@@ -129,9 +143,11 @@ than sentence-transformer models.
   just need nearest-neighbour over a million chunks, a dedicated vector
   database is the better tool. YantrikDB's decay and consolidation add
   nothing to documents that never go stale.
-- **You need caller-supplied ids.** YantrikDB assigns UUIDv7 rids;
-  `add_texts(ids=...)` raises. LangChain's indexing API that depends on
-  stable external ids won't work with this store.
+- **You need caller-supplied ids from PyPI 0.1.0.** That release raises
+  `NotImplementedError` on `add_texts(ids=...)`. `main` accepts them as
+  upsert keys (re-adding an id replaces the document); until the next
+  release, install from git:
+  `pip install git+https://github.com/yantrikos/langchain-yantrikdb`.
 - **MMR retrieval.** `max_marginal_relevance_search` is not implemented.
 - **Exact score reproducibility.** Blended scores move as records age —
   that is the point, but it breaks tests that pin exact score values.
@@ -140,7 +156,7 @@ than sentence-transformer models.
 
 | LangChain surface | Status |
 | --- | --- |
-| `add_texts` / `add_documents` | supported (engine-assigned ids) |
+| `add_texts` / `add_documents` | supported (engine-assigned ids; caller-supplied ids as upsert keys on `main` only) |
 | `similarity_search` / `_with_score` / `_by_vector` | supported |
 | `similarity_search_with_relevance_scores` | supported (scores already in [0, 1]) |
 | `delete(ids)` / `delete()` (namespace-wide) | supported (tombstone) |
