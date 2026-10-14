@@ -57,7 +57,7 @@ jobs:
         run: pytest -q
 
       - name: Run the README example end to end
-        run: python examples/contradiction_detection.py
+        run: python examples/conflict_candidates.py
 
   # Ordinary CI always resolves the engine CEILING, so widening the range
   # (>=0.13,<0.18) would silently stop protecting the floor and intermediate

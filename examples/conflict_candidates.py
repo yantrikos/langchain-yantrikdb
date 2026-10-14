@@ -1,6 +1,11 @@
-"""Contradiction detection through the LangChain VectorStore interface.
+"""Conflict candidates through the LangChain VectorStore interface.
 
-Run: python examples/contradiction_detection.py
+think() flags pairs of records whose embeddings are very similar and may
+be worth a human look — it is a similarity flag, not natural-language
+contradiction detection. See the README's "What that is, and what it
+isn't" caveat, and store.conflicts() for the stricter, structured check.
+
+Run: python examples/conflict_candidates.py
 (no API keys, no model downloads — the bundled embedder does the work)
 """
 
@@ -13,13 +18,13 @@ store.add_texts(
     ["The API rate limit is 100 requests per minute"], importance=0.8
 )
 
-# Month 2: someone stores an updated — and contradictory — fact.
+# Month 2: someone stores an updated — and possibly contradictory — fact.
 store.add_texts(
     ["The API rate limit is 500 requests per minute"], importance=0.8
 )
 
 # A plain vector store now holds both forever and serves whichever
-# embeds closer to the query. YantrikDB notices:
+# embeds closer to the query. think() flags the pair as a candidate:
 report = store.think()
 for trigger in report.get("triggers", []):
     print("FLAGGED:", trigger["reason"])

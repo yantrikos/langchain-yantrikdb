@@ -177,10 +177,21 @@ Tested against langchain-core 0.3.x and 1.x on Python 3.10-3.14.
 
 - [yantrikdb](https://github.com/yantrikos/yantrikdb) — the engine
   itself: Rust core, Python bindings, CLI, REST server.
+- [yantrikdb-server](https://github.com/yantrikos/yantrikdb-server) —
+  the same engine as an HTTP gateway / openraft cluster, for deployments
+  that don't want the engine embedded in-process.
+- [yantrikdb-client](https://github.com/yantrikos/yantrikdb-client) —
+  typed Python SDK for talking to a yantrikdb-server deployment over
+  HTTP, for when you want the client side without this LangChain layer.
 - [yantrikdb-mcp](https://github.com/yantrikos/yantrikdb-mcp) — the same
   memory as an MCP server for Claude Code, Cursor, and other MCP hosts.
 - [yantrikdb-hermes-plugin](https://github.com/yantrikos/yantrikdb-hermes-plugin)
   — memory provider for hermes-agent.
+- [yantrik-memory](https://github.com/yantrikos/yantrik-memory) —
+  persistent cognitive memory for agents on the same engine, with
+  personality traits and bond progression.
+- [openclaw-memory-yantrikdb](https://github.com/yantrikos/openclaw-memory-yantrikdb)
+  — OpenClaw memory plugin backed by YantrikDB.
 
 ## License
 
